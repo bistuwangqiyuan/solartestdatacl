@@ -1,12 +1,14 @@
 import '../styles/globals.css';
 import { Footer } from '../components/footer';
 import { Header } from '../components/header';
+import { AuthProvider } from '../contexts/AuthContext';
 
 export const metadata = {
     title: {
-        template: '%s | Netlify',
-        default: 'Netlify Starter'
-    }
+        template: '%s | Solar Testing',
+        default: 'Solar Disconnect Testing Data Management'
+    },
+    description: 'Industrial-grade system for managing photovoltaic disconnect device testing data'
 };
 
 export default function RootLayout({ children }) {
@@ -15,14 +17,16 @@ export default function RootLayout({ children }) {
             <head>
                 <link rel="icon" href="/favicon.svg" sizes="any" />
             </head>
-            <body className="antialiased text-white bg-blue-900">
-                <div className="flex flex-col min-h-screen px-6 bg-noise sm:px-12">
-                    <div className="flex flex-col w-full max-w-5xl mx-auto grow">
+            <body className="antialiased text-gray-900 bg-gray-50">
+                <AuthProvider>
+                    <div className="flex flex-col min-h-screen">
                         <Header />
-                        <main className="grow">{children}</main>
+                        <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
+                            {children}
+                        </main>
                         <Footer />
                     </div>
-                </div>
+                </AuthProvider>
             </body>
         </html>
     );
