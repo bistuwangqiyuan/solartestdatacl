@@ -1,54 +1,58 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 
 export function StatsCards() {
     const [stats, setStats] = useState({
         totalDevices: 0,
-        totalSessions: 0,
         activeSessions: 0,
-        totalMeasurements: 0
+        totalMeasurements: 0,
+        recentImports: 0,
+        isLoading: true
     })
-    const [isLoading, setIsLoading] = useState(true)
 
     useEffect(() => {
-        loadStats()
+        fetchStats()
     }, [])
 
-    const loadStats = async () => {
+    const fetchStats = async () => {
         try {
-            // Get total devices
+            // Fetch total devices
             const { count: deviceCount } = await supabase
                 .from('devices')
                 .select('*', { count: 'exact', head: true })
 
-            // Get total test sessions
-            const { count: sessionCount } = await supabase
+            // Fetch active sessions
+            const { count: activeSessionCount } = await supabase
                 .from('test_sessions')
                 .select('*', { count: 'exact', head: true })
+                .eq('session_status', 'in_progress')
 
-            // Get active sessions
-            const { count: activeCount } = await supabase
-                .from('test_sessions')
-                .select('*', { count: 'exact', head: true })
-                .eq('status', 'in_progress')
-
-            // Get total measurements
+            // Fetch total measurements
             const { count: measurementCount } = await supabase
                 .from('test_measurements')
                 .select('*', { count: 'exact', head: true })
 
+            // Fetch recent imports (last 7 days)
+            const sevenDaysAgo = new Date()
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+            
+            const { count: importCount } = await supabase
+                .from('excel_imports')
+                .select('*', { count: 'exact', head: true })
+                .gte('created_at', sevenDaysAgo.toISOString())
+
             setStats({
                 totalDevices: deviceCount || 0,
-                totalSessions: sessionCount || 0,
-                activeSessions: activeCount || 0,
-                totalMeasurements: measurementCount || 0
+                activeSessions: activeSessionCount || 0,
+                totalMeasurements: measurementCount || 0,
+                recentImports: importCount || 0,
+                isLoading: false
             })
         } catch (error) {
-            console.error('Error loading stats:', error)
-        } finally {
-            setIsLoading(false)
+            console.error('Error fetching stats:', error)
+            setStats(prev => ({ ...prev, isLoading: false }))
         }
     }
 
@@ -57,72 +61,72 @@ export function StatsCards() {
             title: 'Total Devices',
             value: stats.totalDevices,
             icon: (
-                <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
                 </svg>
             ),
-            color: 'blue',
-            description: 'Registered disconnect devices'
-        },
-        {
-            title: 'Test Sessions',
-            value: stats.totalSessions,
-            icon: (
-                <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-            ),
-            color: 'green',
-            description: 'Total testing sessions'
+            color: 'text-blue-600',
+            bgColor: 'bg-blue-100'
         },
         {
             title: 'Active Sessions',
             value: stats.activeSessions,
             icon: (
-                <svg className="h-6 w-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
             ),
-            color: 'yellow',
-            description: 'Currently in progress'
+            color: 'text-green-600',
+            bgColor: 'bg-green-100'
         },
         {
-            title: 'Measurements',
-            value: stats.totalMeasurements,
+            title: 'Total Measurements',
+            value: stats.totalMeasurements.toLocaleString(),
             icon: (
-                <svg className="h-6 w-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
             ),
-            color: 'purple',
-            description: 'Data points collected'
+            color: 'text-purple-600',
+            bgColor: 'bg-purple-100'
+        },
+        {
+            title: 'Recent Imports',
+            value: stats.recentImports,
+            icon: (
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+            ),
+            color: 'text-orange-600',
+            bgColor: 'bg-orange-100'
         }
     ]
 
+    if (stats.isLoading) {
+        return (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="bg-white rounded-lg shadow p-6 animate-pulse">
+                        <div className="h-4 bg-gray-200 rounded w-24 mb-2"></div>
+                        <div className="h-8 bg-gray-200 rounded w-16"></div>
+                    </div>
+                ))}
+            </div>
+        )
+    }
+
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {statCards.map((card, index) => (
+            {statCards.map((stat, index) => (
                 <div key={index} className="bg-white rounded-lg shadow p-6">
-                    <div className="flex items-center">
-                        <div className={`p-2 rounded-md bg-${card.color}-100`}>
-                            {card.icon}
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm text-gray-600">{stat.title}</p>
+                            <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
                         </div>
-                        <div className="ml-4">
-                            <p className="text-sm font-medium text-gray-600">
-                                {card.title}
-                            </p>
-                            {isLoading ? (
-                                <div className="animate-pulse">
-                                    <div className="h-8 w-16 bg-gray-200 rounded mt-1"></div>
-                                </div>
-                            ) : (
-                                <p className="text-2xl font-semibold text-gray-900">
-                                    {card.value.toLocaleString()}
-                                </p>
-                            )}
-                            <p className="text-xs text-gray-500 mt-1">
-                                {card.description}
-                            </p>
+                        <div className={`${stat.bgColor} p-3 rounded-lg`}>
+                            <div className={stat.color}>{stat.icon}</div>
                         </div>
                     </div>
                 </div>

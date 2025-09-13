@@ -1,11 +1,9 @@
 'use client'
 
-import { useAuth } from '../contexts/AuthContext'
-import { Dashboard } from '../components/dashboard/Dashboard'
-import { LoginForm } from '../components/auth/LoginForm'
-import { AuthLayout } from '../components/layout/AuthLayout'
+import { useAuth } from '@/contexts/AuthContext'
+import { Navigation } from './Navigation'
 
-export default function HomePage() {
+export function AuthLayout({ children }) {
     const { isAuthenticated, isLoading } = useAuth()
 
     if (isLoading) {
@@ -17,12 +15,15 @@ export default function HomePage() {
     }
 
     if (!isAuthenticated) {
-        return <LoginForm />
+        return <>{children}</>
     }
 
     return (
-        <AuthLayout>
-            <Dashboard />
-        </AuthLayout>
+        <>
+            <Navigation />
+            <div className="container mx-auto px-4 py-8 max-w-7xl">
+                {children}
+            </div>
+        </>
     )
 }

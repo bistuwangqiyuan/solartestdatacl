@@ -1,6 +1,5 @@
 import '../styles/globals.css';
 import { Footer } from '../components/footer';
-import { Header } from '../components/header';
 import { AuthProvider } from '../contexts/AuthContext';
 
 export const metadata = {
@@ -20,8 +19,7 @@ export default function RootLayout({ children }) {
             <body className="antialiased text-gray-900 bg-gray-50">
                 <AuthProvider>
                     <div className="flex flex-col min-h-screen">
-                        <Header />
-                        <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl">
+                        <main className="flex-1">
                             {children}
                         </main>
                         <Footer />
