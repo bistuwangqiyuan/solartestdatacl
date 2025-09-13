@@ -1,6 +1,7 @@
 import '../styles/globals.css';
 import { Footer } from '../components/footer';
 import { AuthProvider } from '../contexts/AuthContext';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 
 export const metadata = {
     title: {
@@ -17,14 +18,16 @@ export default function RootLayout({ children }) {
                 <link rel="icon" href="/favicon.svg" sizes="any" />
             </head>
             <body className="antialiased text-gray-900 bg-gray-50">
-                <AuthProvider>
-                    <div className="flex flex-col min-h-screen">
-                        <main className="flex-1">
-                            {children}
-                        </main>
-                        <Footer />
-                    </div>
-                </AuthProvider>
+                <ErrorBoundary>
+                    <AuthProvider>
+                        <div className="flex flex-col min-h-screen">
+                            <main className="flex-1">
+                                {children}
+                            </main>
+                            <Footer />
+                        </div>
+                    </AuthProvider>
+                </ErrorBoundary>
             </body>
         </html>
     );
