@@ -1,239 +1,323 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAuth } from '../../contexts/AuthContext'
 import Link from 'next/link'
+import { useAuth } from '@/contexts/AuthContext'
+import { supabase } from '@/lib/supabase'
+import { formatDate } from '@/utils'
+import { DEVICE_TYPES, DISPLAY_LABELS } from '@/lib/constants'
+import { AuthLayout } from '@/components/layout/AuthLayout'
 
 export default function DevicesPage() {
-    const { isAuthenticated, hasRole } = useAuth()
+    const { hasPermission } = useAuth()
     const [devices, setDevices] = useState([])
     const [isLoading, setIsLoading] = useState(true)
-    const [error, setError] = useState('')
-    const [searchTerm, setSearchTerm] = useState('')
-    const [filterStandard, setFilterStandard] = useState('')
+    const [filters, setFilters] = useState({
+        search: '',
+        manufacturer: '',
+        device_type: ''
+    })
+    const [pagination, setPagination] = useState({
+        page: 1,
+        limit: 20,
+        total: 0
+    })
 
     useEffect(() => {
-        if (isAuthenticated) {
-            loadDevices()
-        }
-    }, [isAuthenticated, searchTerm, filterStandard])
+        fetchDevices()
+    }, [filters, pagination.page])
 
-    const loadDevices = async () => {
+    const fetchDevices = async () => {
         try {
-            const params = new URLSearchParams()
-            if (searchTerm) params.append('manufacturer', searchTerm)
-            if (filterStandard) params.append('standards', filterStandard)
+            setIsLoading(true)
             
-            const response = await fetch(`/api/devices?${params}`)
-            const result = await response.json()
+            let query = supabase
+                .from('devices')
+                .select('*', { count: 'exact' })
+                .eq('is_active', true)
+                .order('created_at', { ascending: false })
             
-            if (!response.ok) {
-                throw new Error(result.error?.message || 'Failed to load devices')
+            // Apply filters
+            if (filters.search) {
+                query = query.or(
+                    `device_name.ilike.%${filters.search}%,model_number.ilike.%${filters.search}%,serial_number.ilike.%${filters.search}%`
+                )
             }
             
-            setDevices(result.data || [])
-        } catch (err) {
-            setError(err.message)
+            if (filters.manufacturer) {
+                query = query.eq('manufacturer', filters.manufacturer)
+            }
+            
+            if (filters.device_type) {
+                query = query.eq('device_type', filters.device_type)
+            }
+            
+            // Pagination
+            const from = (pagination.page - 1) * pagination.limit
+            const to = from + pagination.limit - 1
+            query = query.range(from, to)
+            
+            const { data, error, count } = await query
+            
+            if (error) throw error
+            
+            setDevices(data || [])
+            setPagination(prev => ({ ...prev, total: count || 0 }))
+        } catch (error) {
+            console.error('Error fetching devices:', error)
         } finally {
             setIsLoading(false)
         }
     }
 
-    if (!isAuthenticated) {
-        return (
-            <div className="text-center py-12">
-                <p>Please log in to view devices.</p>
-            </div>
-        )
+    const handleSearch = (e) => {
+        e.preventDefault()
+        setPagination(prev => ({ ...prev, page: 1 }))
+        fetchDevices()
     }
 
-    const getDeviceTypeLabel = (type) => {
-        const labels = {
-            'disconnect_switch': 'Disconnect Switch',
-            'fuse_combination': 'Fuse Combination',
-            'switch_disconnector': 'Switch Disconnector'
-        }
-        return labels[type] || type
-    }
-
-    const getStandardsBadges = (standards) => {
-        if (!standards || standards.length === 0) return null
-        
-        return standards.map((standard, index) => (
-            <span 
-                key={index}
-                className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mr-1"
-            >
-                {standard}
-            </span>
-        ))
-    }
+    const totalPages = Math.ceil(pagination.total / pagination.limit)
 
     return (
-        <div className="space-y-6">
+        <AuthLayout>
+            <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Devices</h1>
-                    <p className="text-gray-600">Manage photovoltaic disconnect devices</p>
-                </div>
-                {hasRole('engineer') && (
-                    <Link
-                        href="/devices/new"
-                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-                    >
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                        Add Device
-                    </Link>
-                )}
-            </div>
-
-            {/* Search and Filter */}
-            <div className="bg-white p-4 rounded-lg shadow">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-white shadow rounded-lg p-6">
+                <div className="flex items-center justify-between">
                     <div>
-                        <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-1">
-                            Search by Manufacturer
-                        </label>
-                        <input
-                            type="text"
-                            id="search"
-                            placeholder="Enter manufacturer name..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                        />
+                        <h1 className="text-2xl font-bold text-gray-900">Devices</h1>
+                        <p className="text-gray-600">Manage photovoltaic disconnect devices</p>
                     </div>
-                    <div>
-                        <label htmlFor="standard" className="block text-sm font-medium text-gray-700 mb-1">
-                            Filter by Standard
-                        </label>
-                        <select
-                            id="standard"
-                            value={filterStandard}
-                            onChange={(e) => setFilterStandard(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    {hasPermission('create_devices') && (
+                        <Link
+                            href="/devices/new"
+                            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
                         >
-                            <option value="">All Standards</option>
-                            <option value="IEC 60947-3">IEC 60947-3</option>
-                            <option value="UL 98B">UL 98B</option>
-                        </select>
-                    </div>
+                            Add New Device
+                        </Link>
+                    )}
                 </div>
             </div>
 
-            {/* Error Message */}
-            {error && (
-                <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-md">
-                    {error}
-                </div>
-            )}
+            {/* Filters */}
+            <div className="bg-white shadow rounded-lg p-6">
+                <form onSubmit={handleSearch} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Search
+                            </label>
+                            <input
+                                type="text"
+                                value={filters.search}
+                                onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                                placeholder="Device name, model, serial..."
+                                className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                            />
+                        </div>
+                        
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Manufacturer
+                            </label>
+                            <input
+                                type="text"
+                                value={filters.manufacturer}
+                                onChange={(e) => setFilters(prev => ({ ...prev, manufacturer: e.target.value }))}
+                                placeholder="Filter by manufacturer"
+                                className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                            />
+                        </div>
+                        
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Device Type
+                            </label>
+                            <select
+                                value={filters.device_type}
+                                onChange={(e) => setFilters(prev => ({ ...prev, device_type: e.target.value }))}
+                                className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                            >
+                                <option value="">All Types</option>
+                                {Object.entries(DEVICE_TYPES).map(([key, value]) => (
+                                    <option key={value} value={value}>
+                                        {DISPLAY_LABELS[value]}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        
+                        <div className="flex items-end">
+                            <button
+                                type="submit"
+                                className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
+                            >
+                                Search
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
 
-            {/* Devices List */}
+            {/* Devices Table */}
             <div className="bg-white shadow rounded-lg overflow-hidden">
                 {isLoading ? (
-                    <div className="p-8 text-center">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                        <p className="mt-2 text-gray-600">Loading devices...</p>
+                    <div className="p-6 text-center">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                        <p className="text-gray-500 mt-2">Loading devices...</p>
                     </div>
                 ) : devices.length === 0 ? (
-                    <div className="p-8 text-center">
-                        <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                        </svg>
-                        <h3 className="mt-2 text-sm font-medium text-gray-900">No devices found</h3>
-                        <p className="mt-1 text-sm text-gray-500">
-                            {searchTerm || filterStandard ? 'Try adjusting your search criteria.' : 'Get started by adding a new device.'}
-                        </p>
-                        {hasRole('engineer') && !searchTerm && !filterStandard && (
-                            <div className="mt-6">
-                                <Link
-                                    href="/devices/new"
-                                    className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-                                >
-                                    Add First Device
-                                </Link>
-                            </div>
-                        )}
+                    <div className="p-6 text-center">
+                        <p className="text-gray-500">No devices found</p>
                     </div>
                 ) : (
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50">
-                                <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Device
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Type
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Ratings
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Standards
-                                    </th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Added
-                                    </th>
-                                    <th className="relative px-6 py-3">
-                                        <span className="sr-only">Actions</span>
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
-                                {devices.map((device) => (
-                                    <tr key={device.id} className="hover:bg-gray-50">
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div>
-                                                <div className="text-sm font-medium text-gray-900">
-                                                    {device.model_number}
-                                                </div>
-                                                <div className="text-sm text-gray-500">
-                                                    {device.manufacturer}
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            {getDeviceTypeLabel(device.device_type)}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            <div>
-                                                <div>{device.voltage_rating}V</div>
-                                                <div className="text-gray-500">{device.current_rating}A</div>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            {getStandardsBadges(device.standards_compliance)}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {new Date(device.created_at).toLocaleDateString()}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                            <Link
-                                                href={`/devices/${device.id}`}
-                                                className="text-blue-600 hover:text-blue-900 mr-4"
-                                            >
-                                                View
-                                            </Link>
-                                            {hasRole('engineer') && (
-                                                <Link
-                                                    href={`/devices/${device.id}/edit`}
-                                                    className="text-gray-600 hover:text-gray-900"
-                                                >
-                                                    Edit
-                                                </Link>
-                                            )}
-                                        </td>
+                    <>
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-gray-200">
+                                <thead className="bg-gray-50">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Device Name
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Type
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Manufacturer
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Model Number
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Ratings
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Standards
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Created
+                                        </th>
+                                        <th className="relative px-6 py-3">
+                                            <span className="sr-only">Actions</span>
+                                        </th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                    {devices.map((device) => (
+                                        <tr key={device.id} className="hover:bg-gray-50">
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <div className="text-sm font-medium text-gray-900">
+                                                    {device.device_name}
+                                                </div>
+                                                {device.serial_number && (
+                                                    <div className="text-xs text-gray-500">
+                                                        SN: {device.serial_number}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                                                    {DISPLAY_LABELS[device.device_type]}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                {device.manufacturer}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                {device.model_number}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                <div>{device.rated_voltage}V</div>
+                                                <div>{device.rated_current}A</div>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <div className="flex flex-wrap gap-1">
+                                                    {device.testing_standard?.map((standard) => (
+                                                        <span
+                                                            key={standard}
+                                                            className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700"
+                                                        >
+                                                            {DISPLAY_LABELS[standard]}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {formatDate(device.created_at)}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                                <Link
+                                                    href={`/devices/${device.id}`}
+                                                    className="text-blue-600 hover:text-blue-900"
+                                                >
+                                                    View
+                                                </Link>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Pagination */}
+                        {totalPages > 1 && (
+                            <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200">
+                                <div className="flex-1 flex justify-between sm:hidden">
+                                    <button
+                                        onClick={() => setPagination(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
+                                        disabled={pagination.page === 1}
+                                        className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                                    >
+                                        Previous
+                                    </button>
+                                    <button
+                                        onClick={() => setPagination(prev => ({ ...prev, page: Math.min(totalPages, prev.page + 1) }))}
+                                        disabled={pagination.page === totalPages}
+                                        className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                                    >
+                                        Next
+                                    </button>
+                                </div>
+                                <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                                    <div>
+                                        <p className="text-sm text-gray-700">
+                                            Showing{' '}
+                                            <span className="font-medium">
+                                                {(pagination.page - 1) * pagination.limit + 1}
+                                            </span>{' '}
+                                            to{' '}
+                                            <span className="font-medium">
+                                                {Math.min(pagination.page * pagination.limit, pagination.total)}
+                                            </span>{' '}
+                                            of{' '}
+                                            <span className="font-medium">{pagination.total}</span>{' '}
+                                            results
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
+                                            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                                                <button
+                                                    key={page}
+                                                    onClick={() => setPagination(prev => ({ ...prev, page }))}
+                                                    className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
+                                                        page === pagination.page
+                                                            ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
+                                                            : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                                                    }`}
+                                                >
+                                                    {page}
+                                                </button>
+                                            ))}
+                                        </nav>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </div>
+        </AuthLayout>
     )
 }
