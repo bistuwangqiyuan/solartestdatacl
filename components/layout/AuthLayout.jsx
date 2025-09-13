@@ -1,6 +1,6 @@
 'use client'
 
-import { useAuth } from '@/contexts/AuthContext'
+import { useAuth } from '../../contexts/AuthContext'
 import { Navigation } from './Navigation'
 
 export function AuthLayout({ children }) {

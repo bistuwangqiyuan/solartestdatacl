@@ -2,75 +2,63 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { useAuth } from '@/contexts/AuthContext'
-import { supabase } from '@/lib/supabase'
-import { formatDate, formatRelativeTime } from '@/utils'
-import { TEST_SESSION_STATUS, TESTING_STANDARDS, DISPLAY_LABELS } from '@/lib/constants'
-import { AuthLayout } from '@/components/layout/AuthLayout'
+import { useAuth } from '../../contexts/AuthContext'
+import { AuthLayout } from '../../components/layout/AuthLayout'
+import { supabase } from '../../lib/supabase'
+import { formatDate } from '../../utils'
 
 export default function TestSessionsPage() {
-    const { hasPermission } = useAuth()
+    const { hasPermission, profile } = useAuth()
     const [sessions, setSessions] = useState([])
     const [isLoading, setIsLoading] = useState(true)
-    const [filters, setFilters] = useState({
-        device_id: '',
-        status: '',
-        date_from: '',
-        date_to: ''
-    })
+    const [filterStatus, setFilterStatus] = useState('')
+    const [filterDevice, setFilterDevice] = useState('')
     const [devices, setDevices] = useState([])
 
     useEffect(() => {
         fetchDevices()
         fetchSessions()
-    }, [filters])
+    }, [filterStatus, filterDevice])
 
     const fetchDevices = async () => {
-        const { data } = await supabase
-            .from('devices')
-            .select('id, device_name, manufacturer, model_number')
-            .eq('is_active', true)
-            .order('device_name')
-        
-        setDevices(data || [])
+        try {
+            const { data } = await supabase
+                .from('devices')
+                .select('id, device_name, manufacturer, model_number')
+                .eq('is_active', true)
+                .order('device_name')
+
+            setDevices(data || [])
+        } catch (error) {
+            console.error('Error fetching devices:', error)
+        }
     }
 
     const fetchSessions = async () => {
         try {
             setIsLoading(true)
-            
             let query = supabase
                 .from('test_sessions')
                 .select(`
                     *,
-                    device:devices(device_name, manufacturer, model_number),
-                    engineer:users!test_engineer_id(full_name),
-                    reviewer:users!quality_reviewer_id(full_name),
-                    _count:test_measurements(count)
+                    device:devices!device_id(device_name, manufacturer, model_number),
+                    engineer:users!test_engineer_id(full_name, email),
+                    reviewer:users!quality_reviewer_id(full_name, email)
                 `)
                 .order('created_at', { ascending: false })
-            
-            // Apply filters
-            if (filters.device_id) {
-                query = query.eq('device_id', filters.device_id)
+
+            if (filterStatus) {
+                query = query.eq('session_status', filterStatus)
             }
-            
-            if (filters.status) {
-                query = query.eq('session_status', filters.status)
+
+            if (filterDevice) {
+                query = query.eq('device_id', filterDevice)
             }
-            
-            if (filters.date_from) {
-                query = query.gte('started_at', filters.date_from)
-            }
-            
-            if (filters.date_to) {
-                query = query.lte('started_at', filters.date_to)
-            }
-            
+
             const { data, error } = await query
-            
+
             if (error) throw error
-            
+
             setSessions(data || [])
         } catch (error) {
             console.error('Error fetching sessions:', error)
@@ -84,13 +72,24 @@ export default function TestSessionsPage() {
             case 'draft':
                 return 'bg-gray-100 text-gray-800'
             case 'in_progress':
-                return 'bg-yellow-100 text-yellow-800'
+                return 'bg-blue-100 text-blue-800'
             case 'completed':
                 return 'bg-green-100 text-green-800'
             case 'failed':
                 return 'bg-red-100 text-red-800'
             case 'cancelled':
-                return 'bg-gray-100 text-gray-600'
+                return 'bg-yellow-100 text-yellow-800'
+            default:
+                return 'bg-gray-100 text-gray-800'
+        }
+    }
+
+    const getStandardBadgeColor = (standard) => {
+        switch (standard) {
+            case 'IEC_60947_3':
+                return 'bg-purple-100 text-purple-800'
+            case 'UL_98B':
+                return 'bg-orange-100 text-orange-800'
             default:
                 return 'bg-gray-100 text-gray-800'
         }
@@ -100,98 +99,83 @@ export default function TestSessionsPage() {
         <AuthLayout>
             <div className="space-y-6">
                 {/* Header */}
-                <div className="bg-white shadow rounded-lg p-6">
+                <div className="bg-white rounded-lg shadow p-6">
                     <div className="flex items-center justify-between">
                         <div>
                             <h1 className="text-2xl font-bold text-gray-900">Test Sessions</h1>
-                            <p className="text-gray-600">Manage testing sessions for PV disconnect devices</p>
+                            <p className="text-gray-600">Manage and monitor testing campaigns</p>
                         </div>
                         {hasPermission('create_test_sessions') && (
                             <Link
                                 href="/test-sessions/new"
-                                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
+                                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
                             >
-                                New Test Session
+                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                </svg>
+                                <span>New Test Session</span>
                             </Link>
                         )}
                     </div>
                 </div>
 
                 {/* Filters */}
-                <div className="bg-white shadow rounded-lg p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-white rounded-lg shadow p-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Device
-                            </label>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
                             <select
-                                value={filters.device_id}
-                                onChange={(e) => setFilters(prev => ({ ...prev, device_id: e.target.value }))}
-                                className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                            >
-                                <option value="">All Devices</option>
-                                {devices.map((device) => (
-                                    <option key={device.id} value={device.id}>
-                                        {device.manufacturer} - {device.device_name} ({device.model_number})
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Status
-                            </label>
-                            <select
-                                value={filters.status}
-                                onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value }))}
-                                className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                value={filterStatus}
+                                onChange={(e) => setFilterStatus(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                             >
                                 <option value="">All Statuses</option>
-                                {Object.entries(TEST_SESSION_STATUS).map(([key, value]) => (
-                                    <option key={value} value={value}>
-                                        {DISPLAY_LABELS[value]}
+                                <option value="draft">Draft</option>
+                                <option value="in_progress">In Progress</option>
+                                <option value="completed">Completed</option>
+                                <option value="failed">Failed</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Device</label>
+                            <select
+                                value={filterDevice}
+                                onChange={(e) => setFilterDevice(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                            >
+                                <option value="">All Devices</option>
+                                {devices.map(device => (
+                                    <option key={device.id} value={device.id}>
+                                        {device.manufacturer} {device.device_name} ({device.model_number})
                                     </option>
                                 ))}
                             </select>
-                        </div>
-                        
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                From Date
-                            </label>
-                            <input
-                                type="date"
-                                value={filters.date_from}
-                                onChange={(e) => setFilters(prev => ({ ...prev, date_from: e.target.value }))}
-                                className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                            />
-                        </div>
-                        
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                To Date
-                            </label>
-                            <input
-                                type="date"
-                                value={filters.date_to}
-                                onChange={(e) => setFilters(prev => ({ ...prev, date_to: e.target.value }))}
-                                className="w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                            />
                         </div>
                     </div>
                 </div>
 
                 {/* Sessions Table */}
-                <div className="bg-white shadow rounded-lg overflow-hidden">
+                <div className="bg-white rounded-lg shadow overflow-hidden">
                     {isLoading ? (
-                        <div className="p-6 text-center">
+                        <div className="p-8 text-center">
                             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                            <p className="text-gray-500 mt-2">Loading test sessions...</p>
+                            <p className="mt-4 text-gray-600">Loading test sessions...</p>
                         </div>
                     ) : sessions.length === 0 ? (
-                        <div className="p-6 text-center">
-                            <p className="text-gray-500">No test sessions found</p>
+                        <div className="p-8 text-center">
+                            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                            </svg>
+                            <p className="mt-4 text-gray-600">No test sessions found</p>
+                            {hasPermission('create_test_sessions') && (
+                                <Link
+                                    href="/test-sessions/new"
+                                    className="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                                >
+                                    Create your first test session
+                                </Link>
+                            )}
                         </div>
                     ) : (
                         <div className="overflow-x-auto">
@@ -199,7 +183,7 @@ export default function TestSessionsPage() {
                                 <thead className="bg-gray-50">
                                     <tr>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Session Name
+                                            Session
                                         </th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Device
@@ -214,10 +198,7 @@ export default function TestSessionsPage() {
                                             Engineer
                                         </th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Measurements
-                                        </th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Started
+                                            Dates
                                         </th>
                                         <th className="relative px-6 py-3">
                                             <span className="sr-only">Actions</span>
@@ -231,44 +212,42 @@ export default function TestSessionsPage() {
                                                 <div className="text-sm font-medium text-gray-900">
                                                     {session.session_name}
                                                 </div>
-                                                {session.compliance_approved && (
-                                                    <div className="text-xs text-green-600">
-                                                        ✓ Approved
-                                                    </div>
-                                                )}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div className="text-sm text-gray-900">
-                                                    {session.device?.manufacturer}
+                                                    {session.device?.device_name}
                                                 </div>
                                                 <div className="text-xs text-gray-500">
-                                                    {session.device?.device_name}
+                                                    {session.device?.manufacturer} • {session.device?.model_number}
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                <span className="text-sm text-gray-900">
-                                                    {DISPLAY_LABELS[session.testing_standard]}
+                                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStandardBadgeColor(session.testing_standard)}`}>
+                                                    {session.testing_standard?.replace(/_/g, ' ')}
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(session.session_status)}`}>
-                                                    {DISPLAY_LABELS[session.session_status]}
+                                                    {session.session_status?.replace(/_/g, ' ')}
                                                 </span>
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                {session.engineer?.full_name}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                {session._count?.[0]?.count || 0}
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <div className="text-sm text-gray-900">
+                                                    {session.engineer?.full_name}
+                                                </div>
+                                                {session.reviewer && (
+                                                    <div className="text-xs text-gray-500">
+                                                        Reviewer: {session.reviewer.full_name}
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                {session.started_at ? (
-                                                    <div>
-                                                        <div>{formatDate(session.started_at)}</div>
-                                                        <div className="text-xs">{formatRelativeTime(session.started_at)}</div>
-                                                    </div>
-                                                ) : (
-                                                    'Not started'
+                                                <div>Created: {formatDate(session.created_at)}</div>
+                                                {session.started_at && (
+                                                    <div>Started: {formatDate(session.started_at)}</div>
+                                                )}
+                                                {session.completed_at && (
+                                                    <div>Completed: {formatDate(session.completed_at)}</div>
                                                 )}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
