@@ -1,206 +1,149 @@
--- Solar Disconnect Testing Data Management System
--- Database Schema Setup Script
+-- Setup script for Supabase database
+-- Run this script in your Supabase SQL editor to initialize the database
 
--- Enable RLS and UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- First, ensure the database is clean
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
 
--- Users table (extends Supabase auth.users)
-CREATE TABLE IF NOT EXISTS public.users (
-    id UUID REFERENCES auth.users(id) PRIMARY KEY,
-    email TEXT NOT NULL UNIQUE,
-    full_name TEXT,
-    role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('admin', 'manager', 'engineer', 'viewer')),
-    department TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    last_active TIMESTAMPTZ DEFAULT NOW()
-);
+-- Grant permissions
+GRANT ALL ON SCHEMA public TO postgres;
+GRANT ALL ON SCHEMA public TO anon;
+GRANT ALL ON SCHEMA public TO authenticated;
+GRANT ALL ON SCHEMA public TO service_role;
 
--- Devices table
-CREATE TABLE IF NOT EXISTS public.devices (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    model_number TEXT NOT NULL,
-    manufacturer TEXT NOT NULL,
-    voltage_rating DECIMAL(10,2) NOT NULL,
-    current_rating DECIMAL(10,2) NOT NULL,
-    resistance_rating DECIMAL(10,2),
-    standards_compliance TEXT[] DEFAULT '{}',
-    device_type TEXT NOT NULL CHECK (device_type IN ('disconnect_switch', 'fuse_combination', 'switch_disconnector')),
-    specifications JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- Now run the main database schema
+-- Copy and paste the contents from database-schema.sql here or run:
+-- \i /path/to/database-schema.sql
 
--- Test sessions table
-CREATE TABLE IF NOT EXISTS public.test_sessions (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    session_name TEXT NOT NULL,
-    test_conditions JSONB NOT NULL DEFAULT '{}',
-    status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'completed', 'failed')),
-    started_at TIMESTAMPTZ DEFAULT NOW(),
-    completed_at TIMESTAMPTZ,
-    excel_file_path TEXT,
-    summary_stats JSONB DEFAULT '{}',
-    notes TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- Additional setup for development/testing
 
--- Test measurements table
-CREATE TABLE IF NOT EXISTS public.test_measurements (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    session_id UUID NOT NULL REFERENCES test_sessions(id) ON DELETE CASCADE,
-    timestamp TIMESTAMPTZ NOT NULL,
-    voltage DECIMAL(12,4) NOT NULL,
-    current DECIMAL(12,4) NOT NULL,
-    resistance DECIMAL(12,4),
-    temperature DECIMAL(8,2),
-    measurement_type TEXT DEFAULT 'normal' CHECK (measurement_type IN ('normal', 'fault', 'transient')),
-    sequence_number INTEGER NOT NULL,
-    raw_data JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- Create a test admin user (you'll need to create this user through Supabase Auth first)
+-- Then run this to set their role:
+/*
+INSERT INTO public.users (id, email, full_name, role, department, is_active)
+VALUES (
+    'YOUR_USER_ID_FROM_SUPABASE_AUTH',
+    'admin@example.com',
+    'Admin User',
+    'admin',
+    'IT Department',
+    true
+) ON CONFLICT (id) DO UPDATE
+SET role = 'admin';
+*/
 
--- Audit logs table
-CREATE TABLE IF NOT EXISTS public.audit_logs (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    action TEXT NOT NULL CHECK (action IN ('create', 'update', 'delete', 'export', 'login', 'logout', 'import')),
-    entity_type TEXT NOT NULL CHECK (entity_type IN ('device', 'test_session', 'measurement', 'user', 'report')),
-    entity_id UUID NOT NULL,
-    changes JSONB DEFAULT '{}',
-    ip_address INET,
-    user_agent TEXT,
-    timestamp TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Report templates table
-CREATE TABLE IF NOT EXISTS public.report_templates (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    name TEXT NOT NULL,
-    template_type TEXT NOT NULL CHECK (template_type IN ('iec_60947_3', 'ul_98b', 'custom')),
-    template_content JSONB NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_by UUID NOT NULL REFERENCES users(id),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Create indexes for performance
-CREATE INDEX IF NOT EXISTS idx_devices_manufacturer ON devices(manufacturer);
-CREATE INDEX IF NOT EXISTS idx_devices_model_number ON devices(model_number);
-CREATE INDEX IF NOT EXISTS idx_devices_standards ON devices USING GIN(standards_compliance);
-
-CREATE INDEX IF NOT EXISTS idx_test_sessions_device_id ON test_sessions(device_id);
-CREATE INDEX IF NOT EXISTS idx_test_sessions_user_id ON test_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_test_sessions_status ON test_sessions(status);
-CREATE INDEX IF NOT EXISTS idx_test_sessions_started_at ON test_sessions(started_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_test_measurements_session_id ON test_measurements(session_id);
-CREATE INDEX IF NOT EXISTS idx_test_measurements_timestamp ON test_measurements(timestamp);
-CREATE INDEX IF NOT EXISTS idx_test_measurements_sequence ON test_measurements(session_id, sequence_number);
-
-CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp DESC);
-
--- Row Level Security (RLS) Policies
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
-ALTER TABLE test_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE test_measurements ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE report_templates ENABLE ROW LEVEL SECURITY;
-
--- Users can read their own profile, admins can read all
-CREATE POLICY "Users can view own profile" ON users
-    FOR SELECT USING (auth.uid() = id);
-
-CREATE POLICY "Admins can view all users" ON users
-    FOR ALL USING (
-        EXISTS (
-            SELECT 1 FROM users 
-            WHERE id = auth.uid() AND role = 'admin'
-        )
-    );
-
--- Devices are readable by all authenticated users, writable by engineers and above
-CREATE POLICY "Authenticated users can view devices" ON devices
-    FOR SELECT USING (auth.role() = 'authenticated');
-
-CREATE POLICY "Engineers can manage devices" ON devices
-    FOR ALL USING (
-        EXISTS (
-            SELECT 1 FROM users 
-            WHERE id = auth.uid() AND role IN ('engineer', 'manager', 'admin')
-        )
-    );
-
--- Test sessions and measurements follow similar pattern
-CREATE POLICY "Users can view own test sessions" ON test_sessions
-    FOR SELECT USING (
-        user_id = auth.uid() OR 
-        EXISTS (
-            SELECT 1 FROM users 
-            WHERE id = auth.uid() AND role IN ('manager', 'admin')
-        )
-    );
-
-CREATE POLICY "Engineers can create test sessions" ON test_sessions
-    FOR INSERT WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM users 
-            WHERE id = auth.uid() AND role IN ('engineer', 'manager', 'admin')
-        )
-    );
-
--- Test measurements inherit session permissions
-CREATE POLICY "Users can view measurements for own sessions" ON test_measurements
-    FOR SELECT USING (
-        EXISTS (
-            SELECT 1 FROM test_sessions 
-            WHERE id = test_measurements.session_id 
-            AND (
-                user_id = auth.uid() OR 
-                EXISTS (
-                    SELECT 1 FROM users 
-                    WHERE id = auth.uid() AND role IN ('manager', 'admin')
-                )
-            )
-        )
-    );
-
--- Function to automatically update updated_at timestamp
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
--- Apply updated_at trigger to relevant tables
-DROP TRIGGER IF EXISTS update_devices_updated_at ON devices;
-CREATE TRIGGER update_devices_updated_at BEFORE UPDATE ON devices
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS update_test_sessions_updated_at ON test_sessions;
-CREATE TRIGGER update_test_sessions_updated_at BEFORE UPDATE ON test_sessions
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS update_users_updated_at ON users;
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- Sample data for development
-INSERT INTO public.devices (model_number, manufacturer, voltage_rating, current_rating, device_type, standards_compliance) 
+-- Create sample test data for development
+-- Sample devices
+INSERT INTO public.devices (device_name, device_type, manufacturer, model_number, serial_number, rated_voltage, rated_current, rated_power, testing_standard)
 VALUES 
-    ('PV-DISC-600-100', 'Solar Corp', 600.00, 100.00, 'disconnect_switch', '{"IEC 60947-3", "UL 98B"}'),
-    ('PV-DISC-1000-200', 'Power Systems Inc', 1000.00, 200.00, 'disconnect_switch', '{"IEC 60947-3", "UL 98B"}'),
-    ('PV-FUSE-600-63', 'FuseTech Ltd', 600.00, 63.00, 'fuse_combination', '{"IEC 60947-3"}')
-ON CONFLICT DO NOTHING;
+    ('PV Disconnect Switch 1000V', 'disconnect_switch', 'SolarTech Industries', 'ST-DS-1000', 'SN-2024-001', 1000, 100, 100000, '{IEC_60947_3,UL_98B}'),
+    ('Solar Circuit Breaker 600V', 'circuit_breaker', 'PowerGuard Systems', 'PG-CB-600', 'SN-2024-002', 600, 200, 120000, '{IEC_60947_3}'),
+    ('PV Load Break Switch 1500V', 'load_break_switch', 'GreenEnergy Corp', 'GE-LBS-1500', 'SN-2024-003', 1500, 150, 225000, '{UL_98B}'),
+    ('Fuse Combination Unit 800V', 'fuse_combination', 'SafeSolar Inc', 'SS-FCU-800', 'SN-2024-004', 800, 125, 100000, '{IEC_60947_3,UL_98B}'),
+    ('Switch Disconnector 1200V', 'switch_disconnector', 'ElectroSafe Ltd', 'ES-SD-1200', 'SN-2024-005', 1200, 175, 210000, '{IEC_60947_3}');
 
--- Insert demo user (this will need to be done manually via Supabase Auth)
--- The user profile will be created automatically via the AuthContext
+-- Set up realtime subscriptions for key tables
+ALTER PUBLICATION supabase_realtime ADD TABLE public.test_sessions;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.test_measurements;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.devices;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.excel_imports;
+
+-- Create helper functions for common operations
+
+-- Function to get test session statistics
+CREATE OR REPLACE FUNCTION public.get_test_session_stats(session_id UUID)
+RETURNS TABLE (
+    total_measurements INTEGER,
+    passed_measurements INTEGER,
+    failed_measurements INTEGER,
+    avg_voltage DECIMAL,
+    avg_current DECIMAL,
+    min_voltage DECIMAL,
+    max_voltage DECIMAL,
+    min_current DECIMAL,
+    max_current DECIMAL,
+    test_duration INTERVAL
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        COUNT(*)::INTEGER as total_measurements,
+        COUNT(CASE WHEN tm.pass_fail = true THEN 1 END)::INTEGER as passed_measurements,
+        COUNT(CASE WHEN tm.pass_fail = false THEN 1 END)::INTEGER as failed_measurements,
+        ROUND(AVG(tm.voltage), 2) as avg_voltage,
+        ROUND(AVG(tm.current), 2) as avg_current,
+        MIN(tm.voltage) as min_voltage,
+        MAX(tm.voltage) as max_voltage,
+        MIN(tm.current) as min_current,
+        MAX(tm.current) as max_current,
+        ts.completed_at - ts.started_at as test_duration
+    FROM public.test_measurements tm
+    JOIN public.test_sessions ts ON tm.test_session_id = ts.id
+    WHERE tm.test_session_id = session_id
+    GROUP BY ts.started_at, ts.completed_at;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to validate measurement data
+CREATE OR REPLACE FUNCTION public.validate_measurement(
+    voltage DECIMAL,
+    current DECIMAL,
+    device_id UUID
+) RETURNS BOOLEAN AS $$
+DECLARE
+    device_record RECORD;
+BEGIN
+    -- Get device specifications
+    SELECT rated_voltage, rated_current INTO device_record
+    FROM public.devices
+    WHERE id = device_id;
+    
+    -- Check if measurements are within acceptable range (typically +10% tolerance)
+    IF voltage > device_record.rated_voltage * 1.1 OR 
+       current > device_record.rated_current * 1.1 THEN
+        RETURN FALSE;
+    END IF;
+    
+    -- Additional validation logic can be added here
+    
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create database indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_measurements_voltage_current ON public.test_measurements(voltage, current);
+CREATE INDEX IF NOT EXISTS idx_measurements_timestamp_session ON public.test_measurements(measurement_timestamp, test_session_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_date_range ON public.test_sessions(started_at, completed_at);
+CREATE INDEX IF NOT EXISTS idx_devices_search ON public.devices USING gin(to_tsvector('english', device_name || ' ' || manufacturer || ' ' || model_number));
+
+-- Create materialized view for dashboard statistics
+CREATE MATERIALIZED VIEW IF NOT EXISTS public.dashboard_stats AS
+SELECT 
+    COUNT(DISTINCT d.id) as total_devices,
+    COUNT(DISTINCT ts.id) as total_sessions,
+    COUNT(DISTINCT CASE WHEN ts.session_status = 'in_progress' THEN ts.id END) as active_sessions,
+    COUNT(DISTINCT CASE WHEN ts.created_at > NOW() - INTERVAL '24 hours' THEN ts.id END) as sessions_last_24h,
+    COUNT(DISTINCT tm.id) as total_measurements,
+    COUNT(DISTINCT CASE WHEN ei.created_at > NOW() - INTERVAL '7 days' THEN ei.id END) as recent_imports
+FROM public.devices d
+CROSS JOIN public.test_sessions ts
+CROSS JOIN public.test_measurements tm
+CROSS JOIN public.excel_imports ei;
+
+-- Create index on materialized view
+CREATE UNIQUE INDEX idx_dashboard_stats ON public.dashboard_stats (total_devices);
+
+-- Refresh function for materialized view
+CREATE OR REPLACE FUNCTION public.refresh_dashboard_stats()
+RETURNS void AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW CONCURRENTLY public.dashboard_stats;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Schedule periodic refresh (requires pg_cron extension)
+-- SELECT cron.schedule('refresh-dashboard-stats', '*/5 * * * *', 'SELECT public.refresh_dashboard_stats();');
+
+COMMENT ON FUNCTION public.get_test_session_stats IS 'Get comprehensive statistics for a test session';
+COMMENT ON FUNCTION public.validate_measurement IS 'Validate measurement data against device specifications';
+COMMENT ON MATERIALIZED VIEW public.dashboard_stats IS 'Pre-aggregated statistics for dashboard performance';
